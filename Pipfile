@@ -4,10 +4,7 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-rich = "*"
-typer = {extras = ["all"], version = "*"}
-pyinquirer = "*"
-prompt-toolkit = "==1.0.14"
+click = "*"
 
 [dev-packages]
 
