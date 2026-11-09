@@ -1,7 +1,8 @@
 """Audio -> stems -> variations -> audio files (+ MIDI files) pipeline."""
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,14 +21,15 @@ from audio2midi.core import audio_io, compress, separate
 from audio2midi.core.convert import MidiConverter, MidiOptions
 from audio2midi.core.variations import build_variations
 from audio2midi.errors import Audio2MidiError
-from audio2midi.utils.logger import add_file_handler
+from audio2midi.utils.logger import log_to_file
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class PipelineConfig:
-    input_file: Path
+    """Settings shared by every processed file."""
+
     output_dir: Path = Path(DEFAULT_OUTPUT_DIR)
     model_name: str = DEFAULT_MODEL_NAME
     operation: str = DEFAULT_SELECTED_OP
@@ -43,17 +45,32 @@ class PipelineConfig:
     log: bool = False
     verbose: bool = False
 
-    @property
-    def track_dir(self) -> Path:
+    def track_dir(self, input_file: Path) -> Path:
         """Where results go: <outdir>/<audio file name>/<operation>."""
-        return Path(self.output_dir) / Path(self.input_file).stem / self.operation
+        return Path(self.output_dir) / Path(input_file).stem / self.operation
 
 
 @dataclass
 class PipelineResult:
+    input_file: Path
     output_dir: Path
     audio_files: list[Path] = field(default_factory=list)
     midi_files: list[Path] = field(default_factory=list)
+
+
+@dataclass
+class FileFailure:
+    input_file: Path
+    error: str
+
+
+@dataclass
+class BatchResult:
+    results: list[PipelineResult] = field(default_factory=list)
+    failures: list[FileFailure] = field(default_factory=list)
+
+
+OnResult = Callable[[int, int, PipelineResult | FileFailure], None]
 
 
 def _select_tracks(available: Sequence[str], requested: Sequence[str] | None, model_name: str) -> list[str]:
@@ -69,52 +86,107 @@ def _select_tracks(available: Sequence[str], requested: Sequence[str] | None, mo
     return [track for track in available if track in requested]
 
 
-def run_pipeline(config: PipelineConfig) -> PipelineResult:
-    track_dir = config.track_dir
-    track_dir.mkdir(parents=True, exist_ok=True)
-    if config.log:
-        add_file_handler(track_dir / LOG_FILE_NAME)
+def _describe(error: Exception) -> str:
+    if isinstance(error, Audio2MidiError):
+        return str(error)
+    return f"{type(error).__name__}: {error}" if str(error) else type(error).__name__
 
-    logger.info("- Input file: %s", config.input_file)
-    logger.info("- Output directory: %s", config.output_dir)
-    logger.info("- Model name: %s", config.model_name)
-    logger.info("- Selected operation: %s", config.operation)
-    logger.info("- Tracks: %s", ", ".join(config.tracks) if config.tracks else "all")
-    logger.info(">> Starting split audio file operations... 🚀")
 
-    separator = separate.load_separator(
-        config.model_name,
-        device=separate.resolve_device(config.device),
-        shifts=config.shifts,
-        overlap=config.overlap,
-        jobs=config.jobs,
-        progress=config.verbose,
-    )
-    tracks = _select_tracks(separator.model.sources, config.tracks, config.model_name)
-    stems, samplerate = separate.separate(separator, Path(config.input_file))
+class Pipeline:
+    """Processes audio files, loading the separation and MIDI models once for all of them."""
 
-    result = PipelineResult(output_dir=track_dir)
-    variations = build_variations(stems, tracks, config.operation)
-    logger.info("> Using %s operation, exporting %d tracks", config.operation, len(variations))
-    for name, wav in variations.items():
-        path = track_dir / f"{name}.{config.audio_format}"
-        audio_io.save_audio(wav, path, samplerate)
-        logger.info("  - %s", path)
-        result.audio_files.append(path)
+    def __init__(self, config: PipelineConfig):
+        self.config = config
+        self._separator = None
+        self._tracks: list[str] = []
+        self._converter = MidiConverter(config.midi_options) if config.midi else None
 
-    if config.midi:
-        logger.info(">> Converting audio to MIDI... ⏳")
-        converter = MidiConverter(config.midi_options)
-        for audio_file in result.audio_files:
-            midi_file = audio_file.with_suffix(f".{MIDI_EXTENSION}")
-            converter.convert(audio_file, midi_file)
-            logger.info("  - %s", midi_file)
-            result.midi_files.append(midi_file)
+    def load(self) -> None:
+        """Load the separation model. Errors here are fatal for every file."""
+        if self._separator is not None:
+            return
+        config = self.config
+        logger.info("> Loading model %s...", config.model_name)
+        self._separator = separate.load_separator(
+            config.model_name,
+            device=separate.resolve_device(config.device),
+            shifts=config.shifts,
+            overlap=config.overlap,
+            jobs=config.jobs,
+            progress=config.verbose,
+        )
+        self._tracks = _select_tracks(self._separator.model.sources, config.tracks, config.model_name)
 
-    if config.compress:
-        logger.info(">> Compressing audio files... 🗜️")
-        for audio_file in result.audio_files:
-            compress.compress_mp3(audio_file)
+    def process(self, input_file: Path) -> PipelineResult:
+        self.load()
+        config = self.config
+        track_dir = config.track_dir(input_file)
+        track_dir.mkdir(parents=True, exist_ok=True)
+        with log_to_file(track_dir / LOG_FILE_NAME) if config.log else nullcontext():
+            try:
+                return self._process(Path(input_file), track_dir)
+            except Exception:
+                logger.debug("Failed to process %s", input_file, exc_info=True)
+                raise
 
-    logger.info(">> Done! ✅")
-    return result
+    def _process(self, input_file: Path, track_dir: Path) -> PipelineResult:
+        config = self.config
+        logger.info("- Input file: %s", input_file)
+        logger.info("- Output directory: %s", track_dir)
+        logger.info("- Model name: %s", config.model_name)
+        logger.info("- Selected operation: %s", config.operation)
+        logger.info("- Tracks: %s", ", ".join(self._tracks))
+        logger.info(">> Starting split audio file operations... 🚀")
+        stems, samplerate = separate.separate(self._separator, input_file)
+
+        result = PipelineResult(input_file=input_file, output_dir=track_dir)
+        variations = build_variations(stems, self._tracks, config.operation)
+        logger.info("> Using %s operation, exporting %d tracks", config.operation, len(variations))
+        for name, wav in variations.items():
+            path = track_dir / f"{name}.{config.audio_format}"
+            audio_io.save_audio(wav, path, samplerate)
+            logger.info("  - %s", path)
+            result.audio_files.append(path)
+
+        if self._converter is not None:
+            logger.info(">> Converting audio to MIDI... ⏳")
+            for audio_file in result.audio_files:
+                midi_file = audio_file.with_suffix(f".{MIDI_EXTENSION}")
+                self._converter.convert(audio_file, midi_file)
+                logger.info("  - %s", midi_file)
+                result.midi_files.append(midi_file)
+
+        if config.compress:
+            logger.info(">> Compressing audio files... 🗜️")
+            for audio_file in result.audio_files:
+                compress.compress_mp3(audio_file)
+
+        logger.info(">> Done! ✅")
+        return result
+
+
+def run_pipeline(config: PipelineConfig, input_files: Sequence[Path], on_result: OnResult | None = None) -> BatchResult:
+    """Process every file. A failing file is recorded and the next one is processed.
+
+    Args:
+        on_result: Called with (index, total, result or failure) after each file, starting at 1.
+
+    Raises:
+        Audio2MidiError: When the model cannot be loaded, which would fail every file.
+    """
+    pipeline = Pipeline(config)
+    pipeline.load()
+    batch = BatchResult()
+    total = len(input_files)
+    for index, input_file in enumerate(input_files, start=1):
+        if total > 1:
+            logger.info(">> [%d/%d] %s", index, total, input_file)
+        try:
+            outcome = pipeline.process(input_file)
+            batch.results.append(outcome)
+        except Exception as error:  # noqa: BLE001 - one bad file must not stop the batch
+            outcome = FileFailure(input_file=Path(input_file), error=_describe(error))
+            batch.failures.append(outcome)
+        if on_result is not None:
+            on_result(index, total, outcome)
+    return batch

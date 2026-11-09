@@ -2,17 +2,15 @@
 
 import logging
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT_LOGGER = "audio2midi"
 
 
-def setup_logging(verbose: bool = False, log_file: Path | None = None) -> logging.Logger:
-    """Configure the app logger.
-
-    Console shows INFO messages in verbose mode, warnings and errors otherwise.
-    The optional log file always records everything, with timestamps.
-    """
+def setup_logging(verbose: bool = False) -> logging.Logger:
+    """Configure the app logger: INFO messages in verbose mode, warnings and errors otherwise."""
     # Third-party libraries (basic-pitch) log noise on the root logger, which would otherwise
     # trigger logging's implicit stderr configuration.
     root = logging.getLogger()
@@ -30,16 +28,21 @@ def setup_logging(verbose: bool = False, log_file: Path | None = None) -> loggin
     console.setLevel(logging.INFO if verbose else logging.WARNING)
     console.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(console)
-
-    if log_file is not None:
-        add_file_handler(log_file)
     return logger
 
 
-def add_file_handler(log_file: Path) -> None:
+@contextmanager
+def log_to_file(log_file: Path) -> Iterator[None]:
+    """Also record everything logged inside the block, with timestamps, to `log_file`."""
     log_file = Path(log_file)
     log_file.parent.mkdir(parents=True, exist_ok=True)
     handler = logging.FileHandler(log_file, encoding="utf-8")
     handler.setLevel(logging.DEBUG)
     handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-    logging.getLogger(ROOT_LOGGER).addHandler(handler)
+    logger = logging.getLogger(ROOT_LOGGER)
+    logger.addHandler(handler)
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
+        handler.close()

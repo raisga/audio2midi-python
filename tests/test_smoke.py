@@ -117,6 +117,26 @@ class TestSmoke(unittest.TestCase):
         self.assert_bass_midi(track_dir / "bass.mid")
         self.assertIn("Selected operation: op_extra", (track_dir / "audio2midi.log").read_text())
 
+    def test_batch_folder(self):
+        """A folder of files: one model load, a bad file reported, the others still processed."""
+        folder = self.workdir / "batch"
+        folder.mkdir()
+        for name in ("first", "second"):
+            (folder / f"{name}.wav").write_bytes(self.clip.read_bytes())
+        (folder / "broken.mp3").write_text("this is not audio")
+
+        process, _ = self.run_cli("-v", "-m", "htdemucs", "-t", "bass", "--no-midi",
+                                  input_file=folder, expect_success=False)  # fmt: skip
+        output = process.stdout + process.stderr
+        self.assertEqual(process.returncode, 1, output)
+        self.assertEqual(output.count("> Loading model htdemucs"), 1, output)
+        self.assertIn(f"[1/3] Failed {folder / 'broken.mp3'}: Could not read audio file", output)
+        self.assertIn("Processed 3 files: 2 succeeded, 1 failed", output)
+        for name in ("first", "second"):
+            track_dir = self.workdir / self._testMethodName / name / "op_mini"
+            self.assert_files(track_dir, ["bass.mp3"])
+            self.read_audio(track_dir / "bass.mp3")
+
     def test_unreadable_file(self):
         bad_file = self.workdir / "not_audio.mp3"
         bad_file.write_text("this is not audio")

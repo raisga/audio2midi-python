@@ -5,8 +5,9 @@ from audio2midi.core.convert import MidiOptions
 from audio2midi.core.dependencies import install_dependencies
 from audio2midi.errors import Audio2MidiError
 from audio2midi.flags.help import custom_help_option
-from audio2midi.flags.options import general_options, midi_options, separation_options
-from audio2midi.pipeline import PipelineConfig, run_pipeline
+from audio2midi.flags.options import general_options, input_arguments, midi_options, separation_options
+from audio2midi.inputs import collect_input_files, find_output_conflicts
+from audio2midi.pipeline import FileFailure, PipelineConfig, PipelineResult, run_pipeline
 from audio2midi.utils.logger import setup_logging
 
 
@@ -16,23 +17,28 @@ from audio2midi.utils.logger import setup_logging
 @general_options
 @separation_options
 @midi_options
+@input_arguments
 @click.pass_context
-def cli(ctx, verbose, install, log, input_file, output_dir, model_name, operation, tracks, audio_format, compress,
-        device, shifts, overlap, jobs, midi, onset_threshold, frame_threshold, min_note_length, min_frequency,
-        max_frequency, multiple_pitch_bends, melodia, midi_tempo):  # fmt: skip
-    """Split an audio file into its instrument tracks and convert each track to MIDI.
+def cli(ctx, verbose, install, log, input_files, recursive, output_dir, model_name, operation, tracks, audio_format,
+        compress, device, shifts, overlap, jobs, midi, onset_threshold, frame_threshold, min_note_length,
+        min_frequency, max_frequency, multiple_pitch_bends, melodia, midi_tempo, files):  # fmt: skip
+    """Split audio files into their instrument tracks and convert each track to MIDI.
+
+    FILES are audio files or folders to process, like -f. Models are loaded once for all of them.
 
     \b
-    Example:
+    Examples:
       audio2midi -f ./sample/djent_rock.mp3 -s op_full -o ./output -v
+      audio2midi ./songs/*.mp3 ./more-songs
     """
     setup_logging(verbose)
 
+    paths = [*input_files, *files]
     if install:
         _run_or_fail(install_dependencies)
-        if input_file is None:
+        if not paths:
             ctx.exit(0)
-    if input_file is None:
+    if not paths:
         click.echo(ctx.get_help())
         ctx.exit(0)
 
@@ -49,8 +55,16 @@ def cli(ctx, verbose, install, log, input_file, output_dir, model_name, operatio
     if min_frequency and max_frequency and min_frequency >= max_frequency:
         raise click.UsageError("--min-frequency must be lower than --max-frequency", ctx)
 
+    try:
+        audio_files = collect_input_files(paths, recursive=recursive, output_dir=output_dir)
+    except Audio2MidiError as error:
+        raise click.UsageError(str(error), ctx) from error
+    conflicts = find_output_conflicts(audio_files)
+    if conflicts:
+        details = "; ".join(f"'{stem}': {', '.join(map(str, inputs))}" for stem, inputs in conflicts.items())
+        raise click.UsageError(f"several inputs would write to the same output folder ({details})", ctx)
+
     config = PipelineConfig(
-        input_file=input_file,
         output_dir=output_dir,
         model_name=model_name,
         operation=operation,
@@ -75,11 +89,39 @@ def cli(ctx, verbose, install, log, input_file, output_dir, model_name, operatio
         log=log,
         verbose=verbose,
     )
-    result = _run_or_fail(run_pipeline, config)
-    summary = f"{len(result.audio_files)} audio tracks"
+    if len(audio_files) == 1:
+        batch = _run_or_fail(run_pipeline, config, audio_files)
+        if batch.failures:
+            raise click.ClickException(batch.failures[0].error)
+        click.echo(_saved_message(batch.results[0]))
+        return
+
+    batch = _run_or_fail(run_pipeline, config, audio_files, _report)
+    summary = f"Processed {_plural(len(audio_files), 'file')}: {len(batch.results)} succeeded"
+    if batch.failures:
+        click.echo(f"{summary}, {len(batch.failures)} failed", err=True)
+        ctx.exit(1)
+    click.echo(summary)
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def _saved_message(result: PipelineResult) -> str:
+    summary = _plural(len(result.audio_files), "audio track")
     if result.midi_files:
-        summary += f" and {len(result.midi_files)} MIDI files"
-    click.echo(f"Saved {summary} to {result.output_dir}")
+        summary += f" and {_plural(len(result.midi_files), 'MIDI file')}"
+    return f"Saved {summary} to {result.output_dir}"
+
+
+def _report(index: int, total: int, outcome: PipelineResult | FileFailure) -> None:
+    """Print each file's outcome as soon as it is processed."""
+    prefix = f"[{index}/{total}]"
+    if isinstance(outcome, FileFailure):
+        click.echo(f"{prefix} Failed {outcome.input_file}: {outcome.error}", err=True)
+    else:
+        click.echo(f"{prefix} {_saved_message(outcome)}")
 
 
 def _run_or_fail(func, *args):

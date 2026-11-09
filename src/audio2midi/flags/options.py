@@ -54,12 +54,15 @@ general_options = _apply([
     click.option("-l", "--log", is_flag=True, help="Save a log file in the output directory."),
 ])  # fmt: skip
 
+input_arguments = click.argument("files", nargs=-1, type=click.Path(exists=True, path_type=Path))
+
 separation_options = _apply([
     click.option(
-        "-f", "--file", "input_file",
-        type=click.Path(exists=True, dir_okay=False, path_type=Path),
-        help="Input audio file to process (mp3, wav, flac or any FFmpeg supported format).",
+        "-f", "--file", "input_files", multiple=True,
+        type=click.Path(exists=True, path_type=Path),
+        help="Audio file (mp3, wav, flac or any FFmpeg supported format) or folder to process, repeatable.",
     ),
+    click.option("-r", "--recursive", is_flag=True, help="Also process audio files in the subfolders of folders."),
     click.option(
         "-o", "--outdir", "output_dir", default=DEFAULT_OUTPUT_DIR, show_default=True,
         type=click.Path(file_okay=False, path_type=Path), help="Output directory.",

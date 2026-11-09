@@ -21,7 +21,8 @@ Python port of [audio2midi](https://github.com/raisga/audio2midi) (bash), with e
 - **MIDI Generation**: Creates a MIDI file from each track with Spotify's [Basic Pitch](https://github.com/spotify/basic-pitch), with tunable parameters.
 - **Track Variations**: Exports complements (`no_vocals`, the whole mix without vocals) and track pairs (`bass_drums`).
 - **Any Input Format**: mp3, wav, flac and anything else FFmpeg can read; exports mp3, wav or flac.
-- **Track Selection, Compression and Logging**: Pick only the tracks you need, shrink mp3 output, keep a log file per run.
+- **Batch Processing**: Process several files or whole folders in one run, loading the models only once.
+- **Track Selection, Compression and Logging**: Pick only the tracks you need, shrink mp3 output, keep a log file per file.
 
 ## Prerequisites
 
@@ -66,7 +67,29 @@ audio2midi \
   --log
 ```
 
-The tool will:
+### Several files
+
+```bash
+audio2midi ./songs/*.mp3              # files as arguments (shell globs work)
+audio2midi -f intro.wav -f outro.wav  # or repeated -f
+audio2midi ./album                    # audio files in a folder
+audio2midi -r ./discography           # ... and in its subfolders
+```
+
+Models are loaded once and reused for every file. A file that fails (unreadable, corrupt) is reported and the others are still processed; the exit code is 1 if any file failed:
+
+```
+[1/3] Saved 4 audio tracks and 4 MIDI files to output/intro/op_mini
+[2/3] Failed album/broken.mp3: Could not read audio file album/broken.mp3
+[3/3] Saved 4 audio tracks and 4 MIDI files to output/outro/op_mini
+Processed 3 files: 2 succeeded, 1 failed
+```
+
+When scanning folders, hidden files and the output directory are skipped, and only audio extensions are picked up (mp3, wav, flac, ogg, opus, m4a, aac, aiff, alac, wma); files given explicitly are always processed. Inputs with the same name (`a/song.mp3` and `b/song.wav`) would share an output folder, so the run is refused before anything is processed.
+
+### Output
+
+For each file, the tool will:
 1. Split the audio file into separate instrument tracks.
 2. Build the track variations of the selected operation.
 3. Convert each track to a MIDI file.
@@ -104,9 +127,10 @@ With `--tracks`, only the selected tracks (and their complements / pairs) are ex
 | `-h, --help` | Show the help message and exit | |
 | `-V, --version` | Show the version and exit | |
 | `-v, --verbose` | Show progress and details | off |
-| `-i, --install` | Install dependencies (exits afterwards unless `-f` is given) | |
-| `-l, --log` | Save a log file in the output directory | off |
-| `-f, --file FILE` | Input audio file | |
+| `-i, --install` | Install dependencies (exits afterwards unless files are given) | |
+| `-l, --log` | Save a log file in each output directory | off |
+| `FILES...` / `-f, --file PATH` | Audio files or folders to process, `-f` is repeatable | |
+| `-r, --recursive` | Also process audio files in the subfolders of folders | off |
 | `-o, --outdir DIR` | Output directory | `output` |
 | `-m, --model NAME` | `htdemucs`, `htdemucs_ft`, `htdemucs_6s`, `hdemucs_mmi`, `mdx`, `mdx_extra`, `mdx_q`, `mdx_extra_q` (the `_q` models need `pip install diffq`) | `htdemucs_ft` |
 | `-s, --select OP` | `op_mini`, `op_full`, `op_extra` | `op_mini` |
