@@ -1,11 +1,11 @@
 """Audio -> stems -> variations -> audio files (+ MIDI files) pipeline."""
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Sequence
 
-from lib.constants import (
+from audio2midi.constants import (
     DEFAULT_AUDIO_FORMAT,
     DEFAULT_DEVICE,
     DEFAULT_MODEL_NAME,
@@ -16,11 +16,11 @@ from lib.constants import (
     LOG_FILE_NAME,
     MIDI_EXTENSION,
 )
-from lib.core import audio_io, compress, separate
-from lib.core.convert import MidiConverter, MidiOptions
-from lib.core.variations import build_variations
-from lib.errors import Audio2MidiError
-from lib.utils.logger import add_file_handler
+from audio2midi.core import audio_io, compress, separate
+from audio2midi.core.convert import MidiConverter, MidiOptions
+from audio2midi.core.variations import build_variations
+from audio2midi.errors import Audio2MidiError
+from audio2midi.utils.logger import add_file_handler
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +31,11 @@ class PipelineConfig:
     output_dir: Path = Path(DEFAULT_OUTPUT_DIR)
     model_name: str = DEFAULT_MODEL_NAME
     operation: str = DEFAULT_SELECTED_OP
-    tracks: Optional[Sequence[str]] = None  # None selects every track of the model
+    tracks: Sequence[str] | None = None  # None selects every track of the model
     audio_format: str = DEFAULT_AUDIO_FORMAT
     compress: bool = False
     midi: bool = True
-    midi_options: MidiOptions = MidiOptions()
+    midi_options: MidiOptions = field(default_factory=MidiOptions)
     device: str = DEFAULT_DEVICE
     shifts: int = DEFAULT_SHIFTS
     overlap: float = DEFAULT_OVERLAP
@@ -52,11 +52,11 @@ class PipelineConfig:
 @dataclass
 class PipelineResult:
     output_dir: Path
-    audio_files: List[Path] = field(default_factory=list)
-    midi_files: List[Path] = field(default_factory=list)
+    audio_files: list[Path] = field(default_factory=list)
+    midi_files: list[Path] = field(default_factory=list)
 
 
-def _select_tracks(available: Sequence[str], requested: Optional[Sequence[str]], model_name: str) -> List[str]:
+def _select_tracks(available: Sequence[str], requested: Sequence[str] | None, model_name: str) -> list[str]:
     if not requested:
         return list(available)
     missing = [track for track in requested if track not in available]
@@ -82,18 +82,16 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     logger.info("- Tracks: %s", ", ".join(config.tracks) if config.tracks else "all")
     logger.info(">> Starting split audio file operations... 🚀")
 
-    device = separate.resolve_device(config.device)
-    model = separate.load_model(config.model_name)
-    tracks = _select_tracks(model.sources, config.tracks, config.model_name)
-    stems, samplerate = separate.separate(
-        model,
-        Path(config.input_file),
-        device=device,
+    separator = separate.load_separator(
+        config.model_name,
+        device=separate.resolve_device(config.device),
         shifts=config.shifts,
         overlap=config.overlap,
         jobs=config.jobs,
         progress=config.verbose,
     )
+    tracks = _select_tracks(separator.model.sources, config.tracks, config.model_name)
+    stems, samplerate = separate.separate(separator, Path(config.input_file))
 
     result = PipelineResult(output_dir=track_dir)
     variations = build_variations(stems, tracks, config.operation)

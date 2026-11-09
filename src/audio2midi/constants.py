@@ -1,7 +1,9 @@
 """Constants and default values shared across the app."""
 
+from audio2midi import __version__
+
 APP_NAME = "audio2midi"
-VERSION = "1.0.0"
+VERSION = __version__
 
 # Operations
 OP_MINI = "op_mini"

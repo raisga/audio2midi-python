@@ -3,12 +3,11 @@
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
-ROOT_LOGGER = "lib"
+ROOT_LOGGER = "audio2midi"
 
 
-def setup_logging(verbose: bool = False, log_file: Optional[Path] = None) -> logging.Logger:
+def setup_logging(verbose: bool = False, log_file: Path | None = None) -> logging.Logger:
     """Configure the app logger.
 
     Console shows INFO messages in verbose mode, warnings and errors otherwise.

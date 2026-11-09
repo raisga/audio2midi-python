@@ -6,10 +6,10 @@ from unittest import mock
 
 from click.testing import CliRunner
 
-from lib.constants import VERSION
-from lib.errors import Audio2MidiError
-from lib.pipeline import PipelineResult
-from main import cli
+from audio2midi.cli import cli
+from audio2midi.constants import VERSION
+from audio2midi.errors import Audio2MidiError
+from audio2midi.pipeline import PipelineResult
 
 
 class TestCLI(unittest.TestCase):
@@ -19,7 +19,7 @@ class TestCLI(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.audio_file = os.path.join(self.tmp.name, "song.mp3")
         Path(self.audio_file).touch()
-        patcher = mock.patch("main.run_pipeline", return_value=PipelineResult(Path("out/song/op_mini")))
+        patcher = mock.patch("audio2midi.cli.run_pipeline", return_value=PipelineResult(Path("out/song/op_mini")))
         self.run_pipeline = patcher.start()
         self.addCleanup(patcher.stop)
         self.addCleanup(self.tmp.cleanup)
@@ -127,14 +127,14 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(result.exit_code, 1)
         self.assertIn('Error: Could not read audio file', result.output)
 
-    @mock.patch('main.install_dependencies')
+    @mock.patch('audio2midi.cli.install_dependencies')
     def test_install_only(self, install):
         result = self.runner.invoke(cli, ['--install'])
         self.assertEqual(result.exit_code, 0, result.output)
         install.assert_called_once()
         self.run_pipeline.assert_not_called()
 
-    @mock.patch('main.install_dependencies')
+    @mock.patch('audio2midi.cli.install_dependencies')
     def test_install_then_process(self, install):
         result = self.runner.invoke(cli, ['-i', '-f', self.audio_file])
         self.assertEqual(result.exit_code, 0, result.output)

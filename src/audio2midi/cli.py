@@ -1,13 +1,13 @@
 import click
 
-from lib.constants import APP_NAME, MODEL_TRACKS, VERSION
-from lib.core.convert import MidiOptions
-from lib.core.dependencies import install_dependencies
-from lib.errors import Audio2MidiError
-from lib.flags.help import custom_help_option
-from lib.flags.options import general_options, midi_options, separation_options
-from lib.pipeline import PipelineConfig, run_pipeline
-from lib.utils.logger import setup_logging
+from audio2midi.constants import APP_NAME, MODEL_TRACKS, VERSION
+from audio2midi.core.convert import MidiOptions
+from audio2midi.core.dependencies import install_dependencies
+from audio2midi.errors import Audio2MidiError
+from audio2midi.flags.help import custom_help_option
+from audio2midi.flags.options import general_options, midi_options, separation_options
+from audio2midi.pipeline import PipelineConfig, run_pipeline
+from audio2midi.utils.logger import setup_logging
 
 
 @click.command(context_settings={"max_content_width": 120})
@@ -24,7 +24,7 @@ def cli(ctx, verbose, install, log, input_file, output_dir, model_name, operatio
 
     \b
     Example:
-      python app/main.py -f ./sample/djent_rock.mp3 -s op_full -o ./output -v
+      audio2midi -f ./sample/djent_rock.mp3 -s op_full -o ./output -v
     """
     setup_logging(verbose)
 

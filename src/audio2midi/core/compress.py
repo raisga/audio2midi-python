@@ -5,8 +5,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from lib.constants import COMPRESS_MP3_QUALITY
-from lib.errors import Audio2MidiError
+from audio2midi.constants import COMPRESS_MP3_QUALITY
+from audio2midi.errors import Audio2MidiError
 
 
 def compress_mp3(path: Path, quality: int = COMPRESS_MP3_QUALITY) -> Path:

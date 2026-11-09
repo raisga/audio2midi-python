@@ -25,36 +25,37 @@ Python port of [audio2midi](https://github.com/raisga/audio2midi) (bash), with e
 
 ## Prerequisites
 
-- **Python 3.10** (see `.python-version`; basic-pitch does not support newer versions on every platform)
-- **FFmpeg**: used to read audio files and compress mp3 output
+- **Python 3.10 or 3.11**. 3.10 is recommended (see `.python-version`): on Linux, basic-pitch pulls in TensorFlow (~600 MB) on 3.11, and it cannot be installed at all on 3.12+.
+- **FFmpeg**: used to read formats demucs can't decode natively and to compress mp3 output
 
 ## Installation
 
 ```bash
 python3.10 -m venv .venv
 source .venv/bin/activate
-python app/main.py --install   # or: make install
+pip install .          # or: make install
+audio2midi --install   # checks FFmpeg (installs it with Homebrew on macOS)
 ```
 
-`--install` installs `requirements.txt` with pip and checks for FFmpeg (installed with Homebrew on macOS; on other platforms the command to run is printed).
+This installs the `audio2midi` command (`python -m audio2midi` works too). `audio2midi --install` also reinstalls missing Python dependencies, and prints the command to install FFmpeg on Linux and Windows.
 
 > On Linux without an NVIDIA GPU, install the CPU build of PyTorch first to save ~2 GB of downloads:
-> `pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu`
+> `pip install torch --index-url https://download.pytorch.org/whl/cpu`
 
-Models are downloaded on first use (~80 MB per Demucs model, `htdemucs_ft` bundles four).
+Models are downloaded from the Hugging Face hub on first use (~80 MB per Demucs model, `htdemucs_ft` bundles four).
 
 ## Usage
 
 ### Basic
 
 ```bash
-python app/main.py -f ./sample/djent_rock.mp3
+audio2midi -f ./sample/djent_rock.mp3
 ```
 
 ### Advanced
 
 ```bash
-python app/main.py \
+audio2midi \
   --verbose \
   --file ./sample/djent_rock.mp3 \
   --select op_full \
@@ -107,7 +108,7 @@ With `--tracks`, only the selected tracks (and their complements / pairs) are ex
 | `-l, --log` | Save a log file in the output directory | off |
 | `-f, --file FILE` | Input audio file | |
 | `-o, --outdir DIR` | Output directory | `output` |
-| `-m, --model NAME` | `htdemucs`, `htdemucs_ft`, `htdemucs_6s`, `hdemucs_mmi`, `mdx`, `mdx_extra`, `mdx_q`, `mdx_extra_q` | `htdemucs_ft` |
+| `-m, --model NAME` | `htdemucs`, `htdemucs_ft`, `htdemucs_6s`, `hdemucs_mmi`, `mdx`, `mdx_extra`, `mdx_q`, `mdx_extra_q` (the `_q` models need `pip install diffq`) | `htdemucs_ft` |
 | `-s, --select OP` | `op_mini`, `op_full`, `op_extra` | `op_mini` |
 | `-t, --tracks TRACKS` | Repeatable or comma separated: `drums`, `bass`, `other`, `vocals` (+ `guitar`, `piano` with `htdemucs_6s`) | all |
 | `-F, --format FMT` | `mp3`, `wav`, `flac` | `mp3` |
@@ -128,22 +129,31 @@ With `--tracks`, only the selected tracks (and their complements / pairs) are ex
 ## Development
 
 ```bash
-make test                                   # python -m unittest discover -s app/tests -t app
+make dev    # pip install -e ".[dev]"
+make test   # unit tests
+make lint   # ruff
 make run FILE=./sample/somber-minimalistic-bass.wav ARGS="-s op_extra"
 ```
 
-The unit tests mock Demucs, Basic Pitch and FFmpeg, so they only need `click` installed.
+The unit tests mock Demucs, Basic Pitch and FFmpeg, so they run without installing the package: `make test` only needs `click`.
 
 ```
-app/
-├── main.py              # CLI entry point
-└── lib/
-    ├── constants.py     # operations, models, tracks, defaults
-    ├── pipeline.py      # separate -> variations -> save -> MIDI -> compress
-    ├── core/            # demucs, basic-pitch, ffmpeg and installer wrappers
-    ├── flags/           # click options
-    └── utils/           # logging
+src/audio2midi/
+├── cli.py           # `audio2midi` command
+├── __main__.py      # `python -m audio2midi`
+├── constants.py     # operations, models, tracks, defaults
+├── pipeline.py      # separate -> variations -> save -> MIDI -> compress
+├── core/            # demucs, basic-pitch, ffmpeg and installer wrappers
+├── flags/           # click options
+└── utils/           # logging
+tests/
 ```
+
+### Dependency notes
+
+- **Demucs 4.1+** is used through its `demucs.api.Separator` API and no longer needs torchaudio.
+- **Basic Pitch** always runs its ONNX model with onnxruntime. Basic Pitch would otherwise pick the unmaintained `tflite-runtime` on Linux, which breaks with numpy 2. Both backends produce the same notes.
+- **`setuptools<81`** is required because `resampy` (pinned `<0.4.3` by Basic Pitch) imports `pkg_resources`.
 
 ## Limitations
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import click
 
-from lib.constants import (
+from audio2midi.constants import (
     ALL_TRACKS,
     AUDIO_FORMATS,
     DEFAULT_AUDIO_FORMAT,

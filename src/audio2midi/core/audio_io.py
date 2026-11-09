@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from lib.constants import DEFAULT_MP3_BITRATE
+from audio2midi.constants import DEFAULT_MP3_BITRATE
 
 
 def save_audio(wav, path: Path, samplerate: int, bitrate: int = DEFAULT_MP3_BITRATE) -> Path:

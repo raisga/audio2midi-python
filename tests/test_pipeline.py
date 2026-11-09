@@ -4,9 +4,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from lib.errors import Audio2MidiError
-from lib.pipeline import PipelineConfig, run_pipeline
-from lib.utils.logger import setup_logging
+from audio2midi.errors import Audio2MidiError
+from audio2midi.pipeline import PipelineConfig, run_pipeline
+from audio2midi.utils.logger import setup_logging
 
 SOURCES = ['drums', 'bass', 'other', 'vocals']
 
@@ -20,14 +20,14 @@ class TestPipeline(unittest.TestCase):
         self.output_dir = Path(self.tmp.name)
         setup_logging(verbose=False)
 
-        model = SimpleNamespace(sources=SOURCES)
+        separator = SimpleNamespace(model=SimpleNamespace(sources=SOURCES))
         stems = {name: float(index) for index, name in enumerate(SOURCES)}
-        self.patch('lib.pipeline.separate.resolve_device', return_value='cpu')
-        self.load_model = self.patch('lib.pipeline.separate.load_model', return_value=model)
-        self.separate = self.patch('lib.pipeline.separate.separate', return_value=(stems, 44100))
-        self.save_audio = self.patch('lib.pipeline.audio_io.save_audio')
-        self.compress = self.patch('lib.pipeline.compress.compress_mp3')
-        self.converter = self.patch('lib.pipeline.MidiConverter').return_value
+        self.patch('audio2midi.pipeline.separate.resolve_device', return_value='cpu')
+        self.load_separator = self.patch('audio2midi.pipeline.separate.load_separator', return_value=separator)
+        self.separate = self.patch('audio2midi.pipeline.separate.separate', return_value=(stems, 44100))
+        self.save_audio = self.patch('audio2midi.pipeline.audio_io.save_audio')
+        self.compress = self.patch('audio2midi.pipeline.compress.compress_mp3')
+        self.converter = self.patch('audio2midi.pipeline.MidiConverter').return_value
 
     def patch(self, target, **kwargs):
         patcher = mock.patch(target, **kwargs)
@@ -45,7 +45,9 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(result.output_dir, track_dir)
         self.assertEqual(result.audio_files, [track_dir / f'{name}.mp3' for name in SOURCES])
         self.assertEqual(result.midi_files, [track_dir / f'{name}.mid' for name in SOURCES])
-        self.load_model.assert_called_once_with('htdemucs_ft')
+        self.load_separator.assert_called_once_with(
+            'htdemucs_ft', device='cpu', shifts=1, overlap=0.25, jobs=0, progress=False
+        )
         self.assertEqual(self.converter.convert.call_count, 4)
         self.compress.assert_not_called()
 

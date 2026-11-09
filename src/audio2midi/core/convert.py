@@ -5,9 +5,8 @@ import io
 import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
 
-from lib.constants import (
+from audio2midi.constants import (
     DEFAULT_FRAME_THRESHOLD,
     DEFAULT_MIDI_TEMPO,
     DEFAULT_MINIMUM_NOTE_LENGTH,
@@ -22,8 +21,8 @@ class MidiOptions:
     onset_threshold: float = DEFAULT_ONSET_THRESHOLD
     frame_threshold: float = DEFAULT_FRAME_THRESHOLD
     minimum_note_length: float = DEFAULT_MINIMUM_NOTE_LENGTH
-    minimum_frequency: Optional[float] = None
-    maximum_frequency: Optional[float] = None
+    minimum_frequency: float | None = None
+    maximum_frequency: float | None = None
     multiple_pitch_bends: bool = False
     melodia_trick: bool = True
     midi_tempo: float = DEFAULT_MIDI_TEMPO
@@ -32,16 +31,18 @@ class MidiOptions:
 class MidiConverter:
     """Loads the basic-pitch model once and reuses it for every track."""
 
-    def __init__(self, options: MidiOptions = MidiOptions()):
-        self.options = options
+    def __init__(self, options: MidiOptions | None = None):
+        self.options = options or MidiOptions()
         self._model = None
 
     def _get_model(self):
         if self._model is None:
-            from basic_pitch import ICASSP_2022_MODEL_PATH
+            from basic_pitch import FilenameSuffix, build_icassp_2022_model_path
             from basic_pitch.inference import Model
 
-            self._model = Model(ICASSP_2022_MODEL_PATH)
+            # Always use the ONNX model: onnxruntime is maintained and numpy 2 compatible,
+            # unlike tflite-runtime, which basic-pitch would pick by default on Linux.
+            self._model = Model(build_icassp_2022_model_path(FilenameSuffix.onnx))
         return self._model
 
     def convert(self, audio_file: Path, midi_file: Path) -> Path:

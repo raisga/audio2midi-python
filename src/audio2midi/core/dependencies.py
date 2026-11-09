@@ -5,13 +5,12 @@ import platform
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from importlib import metadata
 
-from lib.errors import Audio2MidiError
+from audio2midi.constants import APP_NAME
+from audio2midi.errors import Audio2MidiError
 
 logger = logging.getLogger(__name__)
-
-REQUIREMENTS_FILE = Path(__file__).resolve().parents[3] / "requirements.txt"
 
 FFMPEG_HINTS = {
     "Linux": "sudo apt install ffmpeg | sudo pacman -S ffmpeg | sudo dnf install ffmpeg",
@@ -28,8 +27,18 @@ def _run(command):
         raise Audio2MidiError(f"Command failed: {' '.join(command)}") from error
 
 
-def install_python_packages(requirements: Path = REQUIREMENTS_FILE) -> None:
-    _run([sys.executable, "-m", "pip", "install", "-r", str(requirements)])
+def runtime_requirements() -> list[str]:
+    """The package's own runtime requirements, read from its installed metadata."""
+    try:
+        requirements = metadata.requires(APP_NAME) or []
+    except metadata.PackageNotFoundError as error:
+        raise Audio2MidiError(f"{APP_NAME} is not installed, run: pip install -e .") from error
+    return [requirement for requirement in requirements if "extra ==" not in requirement]
+
+
+def install_python_packages() -> None:
+    """Install (or repair) the Python dependencies with pip."""
+    _run([sys.executable, "-m", "pip", "install", *runtime_requirements()])
 
 
 def ensure_ffmpeg() -> None:

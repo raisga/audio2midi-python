@@ -1,5 +1,6 @@
 import click
 
+
 def custom_help_option(f):
     """Adds a -h/--help option to the command."""
     def callback(ctx, param, value):

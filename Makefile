@@ -1,13 +1,19 @@
 PYTHON ?= python3
 FILE ?= ./sample/djent_rock.mp3
 
-.PHONY: install run test
+.PHONY: install dev run test lint
 
 install:
-	$(PYTHON) app/main.py --install
+	$(PYTHON) -m pip install .
+
+dev:
+	$(PYTHON) -m pip install -e ".[dev]"
 
 run:
-	$(PYTHON) app/main.py --verbose --file $(FILE) $(ARGS)
+	$(PYTHON) -m audio2midi --verbose --file $(FILE) $(ARGS)
 
 test:
-	$(PYTHON) -m unittest discover -s app/tests -t app
+	PYTHONPATH=src $(PYTHON) -m unittest discover -s tests -t .
+
+lint:
+	$(PYTHON) -m ruff check src tests

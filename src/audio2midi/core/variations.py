@@ -5,12 +5,13 @@ exactly what `demucs --two-stems=<track>` does for the "no_<track>" complement.
 Values only need to support `+`, so this works with torch tensors and numpy arrays.
 """
 
+from collections.abc import Mapping, Sequence
 from functools import reduce
 from itertools import combinations
 from operator import add
-from typing import Dict, Mapping, Sequence, TypeVar
+from typing import TypeVar
 
-from lib.constants import COMBINATION_SEPARATOR, COMPLEMENT_PREFIX, OP_EXTRA, OP_FULL, OPERATIONS
+from audio2midi.constants import COMBINATION_SEPARATOR, COMPLEMENT_PREFIX, OP_EXTRA, OP_FULL, OPERATIONS
 
 T = TypeVar("T")
 
@@ -19,7 +20,7 @@ def _mix(sources: Sequence[T]) -> T:
     return reduce(add, sources)
 
 
-def build_variations(stems: Mapping[str, T], tracks: Sequence[str], operation: str) -> Dict[str, T]:
+def build_variations(stems: Mapping[str, T], tracks: Sequence[str], operation: str) -> dict[str, T]:
     """Return the named audio variations for an operation.
 
     - op_mini:  every selected track (e.g. "bass").

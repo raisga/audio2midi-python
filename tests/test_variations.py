@@ -1,6 +1,6 @@
 import unittest
 
-from lib.core.variations import build_variations
+from audio2midi.core.variations import build_variations
 
 # Plain numbers stand in for audio tensors: variations only rely on `+`.
 STEMS = {'drums': 1.0, 'bass': 10.0, 'other': 100.0, 'vocals': 1000.0}
