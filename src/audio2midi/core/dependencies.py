@@ -7,7 +7,7 @@ import subprocess
 import sys
 from importlib import metadata
 
-from audio2midi.constants import APP_NAME
+from audio2midi.constants import DIST_NAME
 from audio2midi.errors import Audio2MidiError
 
 logger = logging.getLogger(__name__)
@@ -30,9 +30,9 @@ def _run(command):
 def runtime_requirements() -> list[str]:
     """The package's own runtime requirements, read from its installed metadata."""
     try:
-        requirements = metadata.requires(APP_NAME) or []
+        requirements = metadata.requires(DIST_NAME) or []
     except metadata.PackageNotFoundError as error:
-        raise Audio2MidiError(f"{APP_NAME} is not installed, run: pip install -e .") from error
+        raise Audio2MidiError(f"{DIST_NAME} is not installed, run: pip install {DIST_NAME}") from error
     return [requirement for requirement in requirements if "extra ==" not in requirement]
 
 

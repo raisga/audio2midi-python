@@ -35,11 +35,11 @@ Python port of [audio2midi](https://github.com/raisga/audio2midi) (bash), with e
 ```bash
 python3.10 -m venv .venv
 source .venv/bin/activate
-pip install .          # or: make install
+pip install a2m
 audio2midi --install   # checks FFmpeg (installs it with Homebrew on macOS)
 ```
 
-This installs the `audio2midi` command (`python -m audio2midi` works too). `audio2midi --install` also reinstalls missing Python dependencies, and prints the command to install FFmpeg on Linux and Windows.
+This installs the `audio2midi` command, also available as `a2m` (`python -m audio2midi` works too). To install from a clone instead, run `pip install .` (or `make install`). `audio2midi --install` also reinstalls missing Python dependencies, and prints the command to install FFmpeg on Linux and Windows.
 
 > On Linux without an NVIDIA GPU, install the CPU build of PyTorch first to save ~2 GB of downloads:
 > `pip install torch --index-url https://download.pytorch.org/whl/cpu`
@@ -176,6 +176,7 @@ make dev    # pip install -e ".[dev]"
 make test   # unit tests
 make smoke  # real-model smoke tests (slow, downloads ~500 MB of models once)
 make lint   # ruff
+make build  # sdist and wheel in dist/, checked with twine
 make run FILE=./sample/somber-minimalistic-bass.wav ARGS="-s op_extra"
 ```
 
@@ -209,7 +210,7 @@ tests/
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See the [LICENSE](https://github.com/raisga/audio2midi-python/blob/main/LICENSE) file for details.
 
 ## Acknowledgments
 

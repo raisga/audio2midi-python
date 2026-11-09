@@ -57,7 +57,7 @@ class TestDependencies(unittest.TestCase):
 
     @mock.patch('audio2midi.core.dependencies.metadata.requires', side_effect=PackageNotFoundError)
     def test_not_installed(self, _requires):
-        with self.assertRaisesRegex(Audio2MidiError, 'pip install -e'):
+        with self.assertRaisesRegex(Audio2MidiError, 'pip install a2m'):
             dependencies.runtime_requirements()
 
     @mock.patch('audio2midi.core.dependencies.metadata.requires', return_value=['click>=8.1', 'demucs>=4.1,<5'])

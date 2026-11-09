@@ -3,6 +3,8 @@
 from audio2midi import __version__
 
 APP_NAME = "audio2midi"
+# Name of the distribution on PyPI (`pip install a2m`), which differs from the import package.
+DIST_NAME = "a2m"
 VERSION = __version__
 
 # Operations
