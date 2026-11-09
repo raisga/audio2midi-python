@@ -177,6 +177,7 @@ make test   # unit tests
 make smoke  # real-model smoke tests (slow, downloads ~500 MB of models once)
 make lint   # ruff
 make build  # sdist and wheel in dist/, checked with twine
+make release  # GitHub release of the current version, which publishes it to PyPI
 make run FILE=./sample/somber-minimalistic-bass.wav ARGS="-s op_extra"
 ```
 

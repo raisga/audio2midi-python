@@ -1,12 +1,10 @@
 name: Release
 
 # Publishing a GitHub release (tag vX.Y.Z) uploads the package to PyPI.
-# Running the workflow by hand uploads it to TestPyPI instead, to try a release first.
-# Both use Trusted Publishing: no API token is stored, PyPI trusts this workflow file.
+# It uses Trusted Publishing: no API token is stored, PyPI trusts this workflow file.
 on:
   release:
     types: [published]
-  workflow_dispatch:
 
 jobs:
   build:
@@ -30,7 +28,6 @@ jobs:
         run: python -m twine check --strict dist/*
 
       - name: Check the tag matches the package version
-        if: github.event_name == 'release'
         run: |
           version=$(PYTHONPATH=src python -c "import audio2midi; print(audio2midi.__version__)")
           if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
@@ -44,9 +41,8 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  publish-pypi:
+  publish:
     name: Publish to PyPI
-    if: github.event_name == 'release'
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -61,23 +57,3 @@ jobs:
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
-
-  publish-testpypi:
-    name: Publish to TestPyPI
-    if: github.event_name == 'workflow_dispatch'
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/project/a2m/
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
