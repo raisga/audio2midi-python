@@ -1,7 +1,7 @@
 PYTHON ?= python3
 FILE ?= ./sample/djent_rock.mp3
 
-.PHONY: install dev run test lint
+.PHONY: install dev run test smoke lint
 
 install:
 	$(PYTHON) -m pip install .
@@ -14,6 +14,9 @@ run:
 
 test:
 	PYTHONPATH=src $(PYTHON) -m unittest discover -s tests -t .
+
+smoke:
+	AUDIO2MIDI_SMOKE=1 $(PYTHON) -m unittest tests.test_smoke -v
 
 lint:
 	$(PYTHON) -m ruff check src tests

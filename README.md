@@ -131,11 +131,15 @@ With `--tracks`, only the selected tracks (and their complements / pairs) are ex
 ```bash
 make dev    # pip install -e ".[dev]"
 make test   # unit tests
+make smoke  # real-model smoke tests (slow, downloads ~500 MB of models once)
 make lint   # ruff
 make run FILE=./sample/somber-minimalistic-bass.wav ARGS="-s op_extra"
 ```
 
 The unit tests mock Demucs, Basic Pitch and FFmpeg, so they run without installing the package: `make test` only needs `click`.
+The smoke tests (`tests/test_smoke.py`, skipped unless `AUDIO2MIDI_SMOKE=1`) run the installed CLI on an 8 second excerpt of the sample with the `htdemucs_ft`, `htdemucs_6s` and `htdemucs` models, and check the audio files, MIDI notes, compression and error handling.
+
+CI runs lint and unit tests on every push and pull request. The smoke tests run weekly, on demand, and on pull requests that touch the dependencies or the code wrapping them.
 
 ```
 src/audio2midi/
