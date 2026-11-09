@@ -22,6 +22,7 @@ from audio2midi.constants import (
     MODELS,
     OPERATIONS,
 )
+from audio2midi.core.cache import CACHE_DIR_ENV, CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, default_cache_dir
 
 
 def _parse_tracks(ctx, param, values):
@@ -52,6 +53,12 @@ general_options = _apply([
     click.option("-v", "--verbose", is_flag=True, help="Enable verbose mode, show progress and details."),
     click.option("-i", "--install", is_flag=True, help="Install dependencies (Python packages and FFmpeg)."),
     click.option("-l", "--log", is_flag=True, help="Save a log file in the output directory."),
+    click.option(
+        "--cache/--no-cache", default=True, show_default=True,
+        help=f"Reuse the stems of files separated before, kept in {default_cache_dir()} (set ${CACHE_DIR_ENV}) "
+        f"up to ${CACHE_SIZE_ENV} (default {DEFAULT_CACHE_SIZE}, 0 disables it).",
+    ),
+    click.option("--clear-cache", is_flag=True, help="Delete the cached stems (exits afterwards unless files are given)."),
 ])  # fmt: skip
 
 input_arguments = click.argument("files", nargs=-1, type=click.Path(exists=True, path_type=Path))

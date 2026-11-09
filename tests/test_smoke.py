@@ -42,12 +42,18 @@ class TestSmoke(unittest.TestCase):
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
-    def run_cli(self, *args, input_file=None, expect_success=True):
+    @property
+    def cache_dir(self):
+        """Each test starts with an empty stems cache, so separations really run."""
+        return self.workdir / f"{self._testMethodName}-cache"
+
+    def run_cli(self, *args, input_file=None, expect_success=True, output_name=None):
         """Run `python -m audio2midi`, returning the process and the tracks directory parent."""
         input_file = Path(input_file or self.clip)
-        output_dir = self.workdir / self._testMethodName
+        output_dir = self.workdir / (output_name or self._testMethodName)
         command = [sys.executable, "-m", "audio2midi", "-f", str(input_file), "-o", str(output_dir), "-d", "cpu", *args]
-        process = subprocess.run(command, capture_output=True, text=True, timeout=1800, check=False)
+        env = {**os.environ, "AUDIO2MIDI_CACHE_DIR": str(self.cache_dir)}
+        process = subprocess.run(command, capture_output=True, text=True, timeout=1800, check=False, env=env)
         if expect_success:
             self.assertEqual(process.returncode, 0, f"{process.stdout}\n{process.stderr}")
         return process, output_dir / input_file.stem
@@ -136,6 +142,34 @@ class TestSmoke(unittest.TestCase):
             track_dir = self.workdir / self._testMethodName / name / "op_mini"
             self.assert_files(track_dir, ["bass.mp3"])
             self.read_audio(track_dir / "bass.mp3")
+
+    def test_stems_cache(self):
+        """Later runs reuse the cached stems: no model load, same audio, even for a renamed copy."""
+        import numpy
+
+        options = ("-v", "-m", "htdemucs", "-F", "wav", "--no-midi")
+        first, first_dir = self.run_cli(*options, output_name="first")
+        self.assertIn("> Loading model htdemucs", first.stdout)
+        self.assertIn("> Cached stems in", first.stdout)
+        entries = list((self.cache_dir / "stems").glob("*/*"))
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(sorted(path.name for path in entries[0].iterdir()),
+                         ["bass.flac", "drums.flac", "manifest.json", "other.flac", "vocals.flac"])  # fmt: skip
+
+        renamed = self.workdir / "renamed.wav"
+        renamed.write_bytes(self.clip.read_bytes())
+        second, second_dir = self.run_cli(*options, "-s", "op_full", input_file=renamed, output_name="second")
+        self.assertNotIn("Loading model", second.stdout)
+        self.assertIn("> Using cached stems", second.stdout)
+        self.assertTrue(second.stdout.rstrip().endswith("(cached stems)"), second.stdout)
+        for name in ("drums", "bass", "other", "vocals"):
+            fresh = self.read_audio(first_dir / "op_mini" / f"{name}.wav")
+            cached = self.read_audio(second_dir / "op_full" / f"{name}.wav")
+            numpy.testing.assert_allclose(cached, fresh, atol=1e-4, err_msg=name)  # within 16-bit rounding
+
+        third, _ = self.run_cli(*options, "--no-cache", output_name="third")
+        self.assertIn("> Loading model htdemucs", third.stdout)
+        self.assertNotIn("cached stems", third.stdout.lower())
 
     def test_unreadable_file(self):
         bad_file = self.workdir / "not_audio.mp3"

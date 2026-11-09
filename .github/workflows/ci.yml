@@ -25,9 +25,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # Unit tests mock demucs, basic-pitch and FFmpeg, so only click (and ruff) are needed.
+      # Unit tests mock demucs, basic-pitch and FFmpeg: only click, ruff, and numpy + soundfile
+      # for the stems cache tests are needed.
       - name: Install test dependencies
-        run: python -m pip install "click>=8.1" "ruff==0.17.4"
+        run: python -m pip install "click>=8.1" "ruff==0.17.4" numpy "soundfile>=0.12"
 
       - name: Lint
         run: make lint

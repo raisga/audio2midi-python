@@ -20,6 +20,11 @@ class TestCLI(unittest.TestCase):
         self.audio_file = os.path.join(self.tmp.name, "song.mp3")
         Path(self.audio_file).touch()
         self.failing = set()  # file names the fake pipeline fails on
+        self.cached = set()  # file names the fake pipeline finds in the cache
+        self.cache_dir = Path(self.tmp.name) / 'cache'
+        env = mock.patch.dict(os.environ, {'AUDIO2MIDI_CACHE_DIR': str(self.cache_dir)})
+        env.start()
+        self.addCleanup(env.stop)
         patcher = mock.patch("audio2midi.cli.run_pipeline", side_effect=self.fake_run_pipeline)
         self.run_pipeline = patcher.start()
         self.addCleanup(patcher.stop)
@@ -32,7 +37,8 @@ class TestCLI(unittest.TestCase):
                 outcome = FileFailure(path, f'Could not read audio file {path}')
                 batch.failures.append(outcome)
             else:
-                outcome = PipelineResult(path, config.track_dir(path), [Path('bass.mp3')], [Path('bass.mid')])
+                outcome = PipelineResult(path, config.track_dir(path), [Path('bass.mp3')], [Path('bass.mid')],
+                                         cached=path.name in self.cached)
                 batch.results.append(outcome)
             if on_result is not None:
                 on_result(index, len(files), outcome)
@@ -223,6 +229,54 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(lines[0], f'[1/2] Failed {bad}: Could not read audio file {bad}')
         self.assertEqual(lines[1], '[2/2] Saved 1 audio track and 1 MIDI file to output/good/op_mini')
         self.assertEqual(lines[2], 'Processed 2 files: 1 succeeded, 1 failed')
+
+    def test_cache_enabled_by_default(self):
+        result = self.runner.invoke(cli, [self.audio_file])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(self.config().cache_dir, self.cache_dir)
+        self.assertEqual(self.config().cache_max_size, 2 * 1024**3)
+
+    def test_no_cache(self):
+        result = self.runner.invoke(cli, ['--no-cache', self.audio_file])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIsNone(self.config().cache_dir)
+
+    def test_cache_size_env(self):
+        with mock.patch.dict(os.environ, {'AUDIO2MIDI_CACHE_SIZE': '500MB'}):
+            self.runner.invoke(cli, [self.audio_file])
+        self.assertEqual(self.config().cache_max_size, 500 * 1024**2)
+
+    def test_cache_size_zero_disables_cache(self):
+        with mock.patch.dict(os.environ, {'AUDIO2MIDI_CACHE_SIZE': '0'}):
+            self.runner.invoke(cli, [self.audio_file])
+        self.assertIsNone(self.config().cache_dir)
+
+    def test_invalid_cache_size(self):
+        with mock.patch.dict(os.environ, {'AUDIO2MIDI_CACHE_SIZE': 'lots'}):
+            result = self.runner.invoke(cli, [self.audio_file])
+        self.assertEqual(result.exit_code, 2)
+        self.assertIn('$AUDIO2MIDI_CACHE_SIZE', result.output)
+        self.run_pipeline.assert_not_called()
+
+    def test_clear_cache_only(self):
+        entry = self.cache_dir / 'stems' / 'ab' / 'abc'
+        entry.mkdir(parents=True)
+        (entry / 'bass.flac').write_bytes(b'x' * 2048)
+        result = self.runner.invoke(cli, ['--clear-cache'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(result.output, f'Cleared the stems cache in {self.cache_dir} (2.0 KB freed)\n')
+        self.assertFalse(entry.exists())
+        self.run_pipeline.assert_not_called()
+
+    def test_clear_cache_then_process(self):
+        result = self.runner.invoke(cli, ['--clear-cache', self.audio_file])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.run_pipeline.assert_called_once()
+
+    def test_cached_result_is_reported(self):
+        self.cached.add('song.mp3')
+        result = self.runner.invoke(cli, [self.audio_file])
+        self.assertEqual(result.output, 'Saved 1 audio track and 1 MIDI file to output/song/op_mini (cached stems)\n')
 
 
 if __name__ == '__main__':

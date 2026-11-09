@@ -2,9 +2,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest import mock
 
-from audio2midi.errors import Audio2MidiError
+from audio2midi.errors import Audio2MidiError, ModelLoadError
 from audio2midi.pipeline import FileFailure, PipelineConfig, run_pipeline
 from audio2midi.utils.logger import setup_logging
 
@@ -121,10 +122,79 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(batch.failures[0].error, 'OSError: disk full')
 
     def test_model_error_is_fatal(self):
-        self.load_separator.side_effect = Audio2MidiError("Could not load model 'htdemucs_ft'")
-        with self.assertRaises(Audio2MidiError):
+        self.load_separator.side_effect = ModelLoadError("Could not load model 'htdemucs_ft'")
+        with self.assertRaises(ModelLoadError):
             self.run_batch(['a.mp3', 'b.mp3'])
         self.separate.assert_not_called()
+
+    def test_invalid_tracks_are_fatal(self):
+        with self.assertRaises(Audio2MidiError):
+            self.run_batch(['a.mp3', 'b.mp3'], tracks=('guitar',))
+        self.load_separator.assert_not_called()
+
+
+class FakeCache:
+    """In-memory stand-in for StemCache, keyed by file name and settings."""
+
+    entries: ClassVar[dict] = {}  # shared by every instance, like the files on disk
+
+    def __init__(self, root, max_size):
+        self.entries_dir = Path(root) / 'stems'
+        self.max_size = max_size
+
+    def key(self, audio_file, model_name, shifts, overlap):
+        return f'{Path(audio_file).name}|{model_name}|{shifts}|{overlap}'
+
+    def load(self, key):
+        return self.entries.get(key)
+
+    def store(self, key, stems, samplerate, source=''):
+        self.entries[key] = SimpleNamespace(stems=dict(stems), samplerate=samplerate)
+        return True
+
+
+class TestPipelineCache(TestPipeline):
+    """The pipeline with a stems cache configured."""
+
+    def setUp(self):
+        super().setUp()
+        FakeCache.entries = {}
+        self.cache_class = self.patch('audio2midi.pipeline.StemCache', side_effect=FakeCache)
+        self.patch('audio2midi.pipeline.separate.to_arrays', side_effect=lambda stems: stems)
+        self.patch('audio2midi.pipeline.separate.from_arrays', side_effect=lambda arrays: arrays)
+
+    def run_batch(self, files, on_result=None, **kwargs):
+        kwargs.setdefault('cache_dir', self.output_dir / 'cache')
+        return super().run_batch(files, on_result, **kwargs)
+
+    def test_hit_skips_separation_and_model_load(self):
+        first = self.run_batch(['a.mp3']).results[0]
+        second = self.run_batch(['a.mp3'], operation='op_full', tracks=('bass',)).results[0]
+        self.assertFalse(first.cached)
+        self.assertTrue(second.cached)
+        self.assertEqual(self.separate.call_count, 1)
+        self.load_separator.assert_called_once()
+        self.assertEqual([path.name for path in second.audio_files], ['bass.mp3', 'no_bass.mp3'])
+        self.assertEqual(self.save_audio.call_args_list[-1].args[0], 0.0 + 2.0 + 3.0)  # drums + other + vocals
+
+    def test_fully_cached_batch_never_loads_the_model(self):
+        self.run_batch(['a.mp3', 'b.mp3'])
+        self.load_separator.reset_mock()
+        batch = self.run_batch(['b.mp3', 'a.mp3'])
+        self.assertTrue(all(result.cached for result in batch.results))
+        self.load_separator.assert_not_called()
+
+    def test_settings_changing_the_stems_are_cache_misses(self):
+        self.run_batch(['a.mp3'])
+        self.run_batch(['a.mp3'], shifts=2)
+        self.run_batch(['a.mp3'], model_name='htdemucs')
+        self.assertEqual(self.separate.call_count, 3)
+
+    def test_cache_disabled_without_cache_dir(self):
+        self.run_batch(['a.mp3'], cache_dir=None)
+        self.run_batch(['a.mp3'], cache_dir=None)
+        self.cache_class.assert_not_called()
+        self.assertEqual(self.separate.call_count, 2)
 
 
 if __name__ == '__main__':

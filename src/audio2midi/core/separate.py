@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-from audio2midi.errors import Audio2MidiError
+from audio2midi.errors import Audio2MidiError, ModelLoadError
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +40,10 @@ def load_separator(
             progress=progress,
         )
     except (LoadModelError, ModelLoadingError) as error:
-        raise Audio2MidiError(f"Could not load model '{model_name}': {error}") from error
+        raise ModelLoadError(f"Could not load model '{model_name}': {error}") from error
     except (ImportError, SystemExit) as error:  # demucs exits instead of raising when diffq is missing
         hint = ", quantized models need: pip install diffq" if model_name.endswith("_q") else ""
-        raise Audio2MidiError(f"Could not load model '{model_name}'{hint}") from error
+        raise ModelLoadError(f"Could not load model '{model_name}'{hint}") from error
 
 
 def separate(separator, audio_file: Path) -> tuple[dict[str, "torch.Tensor"], int]:  # noqa: F821
@@ -59,3 +59,15 @@ def separate(separator, audio_file: Path) -> tuple[dict[str, "torch.Tensor"], in
     except LoadAudioError as error:
         raise Audio2MidiError(f"Could not read audio file {audio_file}:\n{error}") from error
     return stems, separator.samplerate
+
+
+def to_arrays(stems: dict) -> dict:
+    """Torch stems -> numpy arrays, for the stems cache."""
+    return {name: stem.detach().cpu().numpy() for name, stem in stems.items()}
+
+
+def from_arrays(arrays: dict) -> dict:
+    """Numpy arrays from the stems cache -> torch stems."""
+    import torch
+
+    return {name: torch.from_numpy(array) for name, array in arrays.items()}

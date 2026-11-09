@@ -22,6 +22,7 @@ Python port of [audio2midi](https://github.com/raisga/audio2midi) (bash), with e
 - **Track Variations**: Exports complements (`no_vocals`, the whole mix without vocals) and track pairs (`bass_drums`).
 - **Any Input Format**: mp3, wav, flac and anything else FFmpeg can read; exports mp3, wav or flac.
 - **Batch Processing**: Process several files or whole folders in one run, loading the models only once.
+- **Stems Cache**: Re-running a file with other options skips the slow separation.
 - **Track Selection, Compression and Logging**: Pick only the tracks you need, shrink mp3 output, keep a log file per file.
 
 ## Prerequisites
@@ -108,6 +109,22 @@ output/djent_rock/op_full/
 └── no_drums.mid
 ```
 
+### Stems cache
+
+Separation is the slow step (minutes per song on CPU), so the separated stems are cached. Running a file again with a different `--select`, `--tracks`, `--format`, `--compress` or MIDI option reuses them, and the model is not even loaded:
+
+```
+$ audio2midi -f song.mp3                      # separates and caches the stems
+$ audio2midi -f song.mp3 -s op_extra -F wav   # seconds, from the cache
+Saved 14 audio tracks and 14 MIDI files to output/song/op_extra (cached stems)
+```
+
+- Entries are keyed by the file *content*, so a renamed or moved file is still found. Changing `--model`, `--shifts` or `--overlap`, or upgrading demucs, separates again.
+- All stems are cached as lossless 24-bit FLAC, whatever `--tracks` selects: about 100 MB per 4 minutes of audio, more for dense mixes.
+- The cache lives in `~/.cache/audio2midi` (`~/Library/Caches/audio2midi` on macOS, `%LOCALAPPDATA%\audio2midi` on Windows), or `$AUDIO2MIDI_CACHE_DIR`.
+- It is limited to 2 GB by default, dropping the least recently used songs first. Set `$AUDIO2MIDI_CACHE_SIZE` to change it (`500MB`, `10GB`, `0` disables the cache).
+- `--no-cache` skips it for one run, `--clear-cache` empties it.
+
 ## Operations
 
 Separation runs once per file; every variation is mixed from the separated stems.
@@ -129,6 +146,8 @@ With `--tracks`, only the selected tracks (and their complements / pairs) are ex
 | `-v, --verbose` | Show progress and details | off |
 | `-i, --install` | Install dependencies (exits afterwards unless files are given) | |
 | `-l, --log` | Save a log file in each output directory | off |
+| `--cache / --no-cache` | Reuse cached stems from earlier runs (see [Stems cache](#stems-cache)) | on |
+| `--clear-cache` | Delete the cached stems (exits afterwards unless files are given) | |
 | `FILES...` / `-f, --file PATH` | Audio files or folders to process, `-f` is repeatable | |
 | `-r, --recursive` | Also process audio files in the subfolders of folders | off |
 | `-o, --outdir DIR` | Output directory | `output` |

@@ -16,11 +16,13 @@ from audio2midi.constants import (
     DEFAULT_SHIFTS,
     LOG_FILE_NAME,
     MIDI_EXTENSION,
+    MODEL_TRACKS,
 )
 from audio2midi.core import audio_io, compress, separate
+from audio2midi.core.cache import DEFAULT_CACHE_SIZE, StemCache, parse_size
 from audio2midi.core.convert import MidiConverter, MidiOptions
 from audio2midi.core.variations import build_variations
-from audio2midi.errors import Audio2MidiError
+from audio2midi.errors import Audio2MidiError, ModelLoadError
 from audio2midi.utils.logger import log_to_file
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,8 @@ class PipelineConfig:
     jobs: int = 0
     log: bool = False
     verbose: bool = False
+    cache_dir: Path | None = None  # None disables the stems cache
+    cache_max_size: int = parse_size(DEFAULT_CACHE_SIZE)
 
     def track_dir(self, input_file: Path) -> Path:
         """Where results go: <outdir>/<audio file name>/<operation>."""
@@ -56,6 +60,7 @@ class PipelineResult:
     output_dir: Path
     audio_files: list[Path] = field(default_factory=list)
     midi_files: list[Path] = field(default_factory=list)
+    cached: bool = False  # stems came from the cache, the separation was skipped
 
 
 @dataclass
@@ -93,16 +98,19 @@ def _describe(error: Exception) -> str:
 
 
 class Pipeline:
-    """Processes audio files, loading the separation and MIDI models once for all of them."""
+    """Processes audio files, loading the separation and MIDI models once for all of them.
+
+    The separation model is only loaded when a file's stems are not cached.
+    """
 
     def __init__(self, config: PipelineConfig):
         self.config = config
         self._separator = None
-        self._tracks: list[str] = []
         self._converter = MidiConverter(config.midi_options) if config.midi else None
+        self._cache = StemCache(config.cache_dir, config.cache_max_size) if config.cache_dir else None
 
     def load(self) -> None:
-        """Load the separation model. Errors here are fatal for every file."""
+        """Load the separation model, raising `ModelLoadError` on failure."""
         if self._separator is not None:
             return
         config = self.config
@@ -115,10 +123,24 @@ class Pipeline:
             jobs=config.jobs,
             progress=config.verbose,
         )
-        self._tracks = _select_tracks(self._separator.model.sources, config.tracks, config.model_name)
+
+    def _stems(self, input_file: Path) -> tuple[dict, int, bool]:
+        """Stems of `input_file`, from the cache when possible: (stems, sample rate, cached)."""
+        config = self.config
+        key = None
+        if self._cache is not None:
+            key = self._cache.key(input_file, config.model_name, config.shifts, config.overlap)
+            hit = self._cache.load(key)
+            if hit is not None:
+                logger.info("> Using cached stems from %s", self._cache.entries_dir)
+                return separate.from_arrays(hit.stems), hit.samplerate, True
+        self.load()
+        stems, samplerate = separate.separate(self._separator, input_file)
+        if self._cache is not None and self._cache.store(key, separate.to_arrays(stems), samplerate, input_file.name):
+            logger.info("> Cached stems in %s", self._cache.entries_dir)
+        return stems, samplerate, False
 
     def process(self, input_file: Path) -> PipelineResult:
-        self.load()
         config = self.config
         track_dir = config.track_dir(input_file)
         track_dir.mkdir(parents=True, exist_ok=True)
@@ -135,12 +157,13 @@ class Pipeline:
         logger.info("- Output directory: %s", track_dir)
         logger.info("- Model name: %s", config.model_name)
         logger.info("- Selected operation: %s", config.operation)
-        logger.info("- Tracks: %s", ", ".join(self._tracks))
         logger.info(">> Starting split audio file operations... 🚀")
-        stems, samplerate = separate.separate(self._separator, input_file)
+        stems, samplerate, cached = self._stems(input_file)
+        tracks = _select_tracks(list(stems), config.tracks, config.model_name)
+        logger.info("- Tracks: %s", ", ".join(tracks))
 
-        result = PipelineResult(input_file=input_file, output_dir=track_dir)
-        variations = build_variations(stems, self._tracks, config.operation)
+        result = PipelineResult(input_file=input_file, output_dir=track_dir, cached=cached)
+        variations = build_variations(stems, tracks, config.operation)
         logger.info("> Using %s operation, exporting %d tracks", config.operation, len(variations))
         for name, wav in variations.items():
             path = track_dir / f"{name}.{config.audio_format}"
@@ -172,10 +195,10 @@ def run_pipeline(config: PipelineConfig, input_files: Sequence[Path], on_result:
         on_result: Called with (index, total, result or failure) after each file, starting at 1.
 
     Raises:
-        Audio2MidiError: When the model cannot be loaded, which would fail every file.
+        Audio2MidiError: When the tracks or the model are invalid, which would fail every file.
     """
+    _select_tracks(MODEL_TRACKS.get(config.model_name, ()), config.tracks, config.model_name)
     pipeline = Pipeline(config)
-    pipeline.load()
     batch = BatchResult()
     total = len(input_files)
     for index, input_file in enumerate(input_files, start=1):
@@ -184,6 +207,8 @@ def run_pipeline(config: PipelineConfig, input_files: Sequence[Path], on_result:
         try:
             outcome = pipeline.process(input_file)
             batch.results.append(outcome)
+        except ModelLoadError:
+            raise
         except Exception as error:  # noqa: BLE001 - one bad file must not stop the batch
             outcome = FileFailure(input_file=Path(input_file), error=_describe(error))
             batch.failures.append(outcome)

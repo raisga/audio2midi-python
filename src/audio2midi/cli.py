@@ -1,6 +1,7 @@
 import click
 
 from audio2midi.constants import APP_NAME, MODEL_TRACKS, VERSION
+from audio2midi.core.cache import CACHE_SIZE_ENV, StemCache, configured_max_size, default_cache_dir
 from audio2midi.core.convert import MidiOptions
 from audio2midi.core.dependencies import install_dependencies
 from audio2midi.errors import Audio2MidiError
@@ -19,7 +20,7 @@ from audio2midi.utils.logger import setup_logging
 @midi_options
 @input_arguments
 @click.pass_context
-def cli(ctx, verbose, install, log, input_files, recursive, output_dir, model_name, operation, tracks, audio_format,
+def cli(ctx, verbose, install, log, cache, clear_cache, input_files, recursive, output_dir, model_name, operation, tracks, audio_format,
         compress, device, shifts, overlap, jobs, midi, onset_threshold, frame_threshold, min_note_length,
         min_frequency, max_frequency, multiple_pitch_bends, melodia, midi_tempo, files):  # fmt: skip
     """Split audio files into their instrument tracks and convert each track to MIDI.
@@ -34,10 +35,14 @@ def cli(ctx, verbose, install, log, input_files, recursive, output_dir, model_na
     setup_logging(verbose)
 
     paths = [*input_files, *files]
+    cache_dir = default_cache_dir()
     if install:
         _run_or_fail(install_dependencies)
-        if not paths:
-            ctx.exit(0)
+    if clear_cache:
+        freed = StemCache(cache_dir, max_size=0).clear()
+        click.echo(f"Cleared the stems cache in {cache_dir} ({_format_size(freed)} freed)")
+    if (install or clear_cache) and not paths:
+        ctx.exit(0)
     if not paths:
         click.echo(ctx.get_help())
         ctx.exit(0)
@@ -54,6 +59,10 @@ def cli(ctx, verbose, install, log, input_files, recursive, output_dir, model_na
         raise click.UsageError("--compress only applies to the mp3 format", ctx)
     if min_frequency and max_frequency and min_frequency >= max_frequency:
         raise click.UsageError("--min-frequency must be lower than --max-frequency", ctx)
+    try:
+        cache_max_size = configured_max_size()
+    except ValueError as error:
+        raise click.UsageError(f"${CACHE_SIZE_ENV}: {error}", ctx) from error
 
     try:
         audio_files = collect_input_files(paths, recursive=recursive, output_dir=output_dir)
@@ -88,6 +97,8 @@ def cli(ctx, verbose, install, log, input_files, recursive, output_dir, model_na
         jobs=jobs,
         log=log,
         verbose=verbose,
+        cache_dir=cache_dir if cache and cache_max_size > 0 else None,
+        cache_max_size=cache_max_size,
     )
     if len(audio_files) == 1:
         batch = _run_or_fail(run_pipeline, config, audio_files)
@@ -112,7 +123,16 @@ def _saved_message(result: PipelineResult) -> str:
     summary = _plural(len(result.audio_files), "audio track")
     if result.midi_files:
         summary += f" and {_plural(len(result.midi_files), 'MIDI file')}"
-    return f"Saved {summary} to {result.output_dir}"
+    cached = " (cached stems)" if result.cached else ""
+    return f"Saved {summary} to {result.output_dir}{cached}"
+
+
+def _format_size(size: int) -> str:
+    for unit in ("B", "KB", "MB"):
+        if size < 1024:
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
 
 
 def _report(index: int, total: int, outcome: PipelineResult | FileFailure) -> None:
